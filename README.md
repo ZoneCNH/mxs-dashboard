@@ -20,10 +20,23 @@
 - `live`：宏观 10/11 指标实测值。FRED 侧走 fredpy PIT（vintage 2026-11-19），Yahoo 侧为对照源（GC=F / HG=F / DX-Y.NYB canonical 对照；^GSPC / ^VIX 非 canonical 对照）。`hy_oas`（BAMLH0A0HYM2）fredpy 未接入观测，置 0。M/S 为占位待人工判定。
 - 其余预设为离线示例快照。
 
-## 重新生成实测快照
+## 实测数据流水线（每日自动）
+
+```
+cron 06:45 CST → tools/run_daily.sh
+  → tools/fetch_live_snapshot.py   # fredpy PIT + Yahoo → /tmp/mxs_live.json
+  → tools/push_live_snapshot.py    # 更新 Lark「MxS 指标明细」实测-滚动 11 行
+```
+
+- Lark 侧 `快照=实测-滚动` 为就地更新的最新快照（不新建行；历史快照暂存在 `/tmp/mxs_live_*.json` 与 `logs/daily.log`）。
+- 手动刷新：`tools/run_daily.sh` 或单独跑两个脚本。
+- 依赖：`~/.config` 无关；fredpy 凭据读 `/home/workspace/bytechainx/.config/fredpy-mxs.env`；`lark-cli` 需在 PATH（`~/.npm-global/bin`）。
+
+## 重新生成实测快照（手动）
 
 ```bash
 python3 tools/fetch_live_snapshot.py > /tmp/mxs_live.json
+python3 tools/push_live_snapshot.py /tmp/mxs_live.json   # 可选：写回 Lark
 ```
 
 依赖：fredpy 服务（`FREDPY_MXS_CLIENT_ID/SECRET`，默认 `http://127.0.0.1:8000/api/v1`）+ Yahoo chart API。口径：trend_20d + z(2y 滚动, pstdev, min 60)；jobless_claims 用 4 周相对变化。产物含 `raw_z`（未截断）与 `diagnostics`（各源最后观测日）。
