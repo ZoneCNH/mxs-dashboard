@@ -471,6 +471,34 @@
         s: { trend: -1.0, leverage: -1.0, heat: -0.9, deleverage: 0.9, volatility: 0.7 },
         macro: { real_yield: 0.9, dxy: 1.0, spx: -1.0, breakeven: -0.3, gold: 0.6, oil: 0.8,
                  copper: -0.8, hy_oas: 1.0, yield_curve: -0.4, jobless_claims: 0.9, vix: 1.0 }
+      },
+      coiled: {
+        label: 'M1×S7 流动牛市·压缩蓄势（突破预备）',
+        m: 'M1', conf: 74, age: 2,
+        s: { trend: 0.3, leverage: 0.4, heat: 0.2, deleverage: 0.0, volatility: -0.8 },
+        macro: { real_yield: -0.3, dxy: -0.3, spx: 0.4, breakeven: 0.1, gold: 0.1, oil: 0.0,
+                 copper: 0.2, hy_oas: -0.2, yield_curve: 0.1, jobless_claims: -0.2, vix: -0.6 }
+      },
+      recovery: {
+        label: 'M2×S5 再通复苏·箱体震荡',
+        m: 'M2', conf: 68, age: 3,
+        s: { trend: 0.2, leverage: 0.1, heat: 0.1, deleverage: 0.0, volatility: 0.5 },
+        macro: { real_yield: 0.1, dxy: -0.2, spx: 0.5, breakeven: 0.6, gold: 0.4, oil: 0.3,
+                 copper: 0.5, hy_oas: -0.1, yield_curve: 0.3, jobless_claims: -0.3, vix: -0.1 }
+      },
+      easing: {
+        label: 'M5×S3 衰退降息·空头趋势',
+        m: 'M5', conf: 70, age: 4,
+        s: { trend: -0.95, leverage: -0.7, heat: -0.7, deleverage: 0.3, volatility: 0.4 },
+        macro: { real_yield: -0.5, dxy: 0.3, spx: -0.7, breakeven: -0.5, gold: 0.4, oil: -0.3,
+                 copper: -0.5, hy_oas: 0.5, yield_curve: 0.3, jobless_claims: 0.6, vix: 0.4 }
+      },
+      deleverbox: {
+        label: 'M6×S5 信用去杠·箱体震荡（生存模式）',
+        m: 'M6', conf: 82, age: 1,
+        s: { trend: -0.3, leverage: -0.4, heat: -0.3, deleverage: 0.5, volatility: 0.6 },
+        macro: { real_yield: 0.6, dxy: 0.8, spx: -0.6, breakeven: -0.2, gold: 0.7, oil: 0.5,
+                 copper: -0.6, hy_oas: 0.9, yield_curve: -0.3, jobless_claims: 0.5, vix: 0.7 }
       }
     };
 
