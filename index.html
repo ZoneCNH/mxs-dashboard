@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Macro×Signals（MxS）宏观×市场状态监控仪表盘</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'Noto Sans SC', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+          },
+          colors: {
+            inst: { bg: '#F8FAFC', card: '#FFFFFF', border: '#E2E8F0', navy: '#0F172A', blue: '#1E3A8A', muted: '#64748B' }
+          }
+        }
+      }
+    };
+  </script>
+
+  <style>
+    body { background-color: #F8FAFC; color: #0F172A; -webkit-font-smoothing: antialiased; }
+    .tabular-nums { font-variant-numeric: tabular-nums; }
+    input[type="range"].inst-slider {
+      -webkit-appearance: none; appearance: none; width: 100%; height: 4px;
+      background: #E2E8F0; border-radius: 9999px; outline: none; cursor: pointer;
+    }
+    input[type="range"].inst-slider::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none; width: 14px; height: 14px;
+      border-radius: 50%; background: #1E3A8A; border: 2px solid #FFFFFF;
+      box-shadow: 0 1px 3px rgba(15,23,42,0.3);
+    }
+    input[type="range"].inst-slider::-moz-range-thumb {
+      width: 14px; height: 14px; border-radius: 50%; background: #1E3A8A;
+      border: 2px solid #FFFFFF; box-shadow: 0 1px 3px rgba(15,23,42,0.3);
+    }
+    .mxs-cell { transition: all .15s ease; }
+    .mxs-cell.current { outline: 3px solid #0F172A; outline-offset: -3px; z-index: 2; }
+    @keyframes fadeInSlide { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+    .toast-anim { animation: fadeInSlide .2s ease-out forwards; }
+  </style>
+</head>
+<body class="min-h-screen font-sans text-slate-900">
+
+  <div id="toast-container" class="fixed top-4 right-4 z-50 pointer-events-none flex flex-col gap-2"></div>
+
+  <!-- ===================== 顶部状态栏 ===================== -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+    <div class="max-w-[1440px] mx-auto px-4 sm:px-6 py-3.5">
+      <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+        <div>
+          <div class="flex flex-wrap items-center gap-2.5">
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold tracking-wider uppercase bg-slate-900 text-white">
+              MACRO × SIGNALS
+            </span>
+            <h1 class="text-lg sm:text-xl font-bold tracking-tight text-slate-900">
+              Macro×Signals（MxS）宏观叙事 × 市场状态监控仪表盘
+            </h1>
+          </div>
+          <p class="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span>数据基准：<strong class="text-slate-700 font-medium">离线推演（未接入实时行情）</strong></span>
+            <span class="hidden sm:inline text-slate-300">|</span>
+            <span>口径正本：knowledge/framework/config/{narratives,regimes,ms_matrix_core,risk,matrix_cells}.yaml</span>
+          </p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3">
+          <!-- 当前判定格 -->
+          <div class="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-2">
+            <div>
+              <div class="text-[11px] text-slate-500 font-medium leading-none">当前判定 M×S</div>
+              <div class="flex items-baseline gap-1.5 mt-1">
+                <span id="cell-ms" class="text-2xl font-bold tabular-nums leading-none text-slate-900">--</span>
+                <span id="cell-tr" class="text-sm font-bold tabular-nums text-blue-900">--</span>
+              </div>
+            </div>
+            <div class="w-20 sm:w-24 h-2 bg-slate-200 rounded-full overflow-hidden">
+              <div id="conf-bar" class="h-full bg-blue-900 transition-all duration-300 rounded-full" style="width: 0%;"></div>
+            </div>
+          </div>
+
+          <div id="regime-badge-box" class="border rounded-lg px-3.5 py-2 bg-blue-50 border-blue-200">
+            <div class="text-[11px] font-medium text-slate-500 leading-none">决策模板 / 风险档位</div>
+            <div class="flex items-center gap-2 mt-1">
+              <span id="regime-dot" class="w-2 h-2 rounded-full bg-blue-900"></span>
+              <span id="regime-title" class="text-sm font-bold text-blue-900 leading-none">--</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 情景预设 + 重置 -->
+      <div class="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+        <div class="flex flex-wrap items-center gap-1.5" id="scenario-buttons">
+          <span class="text-xs font-medium text-slate-500 mr-1">情景推演：</span>
+        </div>
+        <button id="btn-reset" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 active:bg-slate-100 transition-colors">
+          <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          重置为默认情景
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-[1440px] mx-auto px-4 sm:px-6 py-5 space-y-5">
+
+    <!-- ===================== 模块 1：M×S 传导链条 ===================== -->
+    <section class="bg-white border border-slate-200 rounded-lg p-4">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+        <h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+          <span class="w-1 h-4 bg-blue-900 rounded-full"></span>
+          宏观叙事 → LGIP 归因 → 市场状态 → 7×7 决策矩阵
+        </h2>
+        <span class="text-[11px] text-slate-400">方向听 S · 仓位听 M · M6 全行 R0</span>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <!-- M 卡 -->
+        <div class="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+          <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">L1 宏观叙事 M</div>
+          <div class="mt-1.5 flex items-center gap-2">
+            <select id="m-select" class="text-sm font-bold text-slate-900 bg-white border border-slate-300 rounded px-1.5 py-1"></select>
+            <span id="m-bias" class="text-[11px] font-semibold px-1.5 py-0.5 rounded"></span>
+          </div>
+          <div id="m-name" class="text-xs text-slate-600 mt-1.5 leading-snug"></div>
+          <div class="mt-2 grid grid-cols-3 gap-1 text-center">
+            <div class="bg-white border border-slate-200 rounded px-1 py-1">
+              <div class="text-[10px] text-slate-400">置信度</div>
+              <input id="m-conf" type="number" min="0" max="100" step="1" class="w-full text-xs font-bold tabular-nums text-center bg-transparent outline-none" />
+            </div>
+            <div class="bg-white border border-slate-200 rounded px-1 py-1">
+              <div class="text-[10px] text-slate-400">时效(天)</div>
+              <input id="m-age" type="number" min="0" max="30" step="1" class="w-full text-xs font-bold tabular-nums text-center bg-transparent outline-none" />
+            </div>
+            <div class="bg-white border border-slate-200 rounded px-1 py-1">
+              <div class="text-[10px] text-slate-400">准入门槛</div>
+              <div id="m-threshold" class="text-xs font-bold tabular-nums text-slate-800">--</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- LGIP 卡 -->
+        <div class="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+          <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">L1 LGIP 四因子</div>
+          <div id="lgip-readout" class="mt-2 space-y-1 text-xs tabular-nums"></div>
+          <div class="mt-2 text-[10px] text-slate-400 leading-snug" id="lgip-note"></div>
+        </div>
+
+        <!-- S 卡 -->
+        <div class="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+          <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">L2 市场状态 S</div>
+          <div class="mt-1.5 flex items-center gap-2">
+            <span id="s-badge" class="text-sm font-bold px-2 py-0.5 rounded bg-slate-900 text-white">--</span>
+            <span id="s-ws" class="text-xs tabular-nums text-slate-600"></span>
+          </div>
+          <div id="s-name" class="text-xs text-slate-600 mt-1.5 leading-snug"></div>
+          <div id="s-warnings" class="mt-1.5 space-y-0.5 text-[11px]"></div>
+        </div>
+
+        <!-- 矩阵格卡 -->
+        <div class="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+          <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">L3 决策矩阵单元</div>
+          <div class="mt-1.5 flex items-baseline gap-2">
+            <span id="cell-template" class="text-lg font-bold text-slate-900">--</span>
+            <span id="cell-risk" class="text-sm font-bold tabular-nums text-blue-900">--</span>
+            <span id="cell-risk-raw" class="text-[10px] text-slate-400"></span>
+          </div>
+          <div id="cell-params" class="mt-2 grid grid-cols-2 gap-x-2 gap-y-0.5 text-[11px] tabular-nums"></div>
+          <div id="cell-notes" class="mt-1.5 text-[11px] text-slate-500"></div>
+        </div>
+      </div>
+
+      <!-- 门控与冲突提示条 -->
+      <div id="gate-pills" class="mt-3 flex flex-wrap items-center gap-1.5"></div>
+    </section>
+
+    <!-- ===================== 模块 2：图表区 ===================== -->
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <!-- 图 1：LGIP 四因子 -->
+      <div class="bg-white border border-slate-200 rounded-lg p-4 flex flex-col">
+        <div class="flex items-start justify-between gap-2 mb-3">
+          <div>
+            <h3 class="text-sm font-bold text-slate-900">LGIP 四因子归因</h3>
+            <p class="text-[11px] text-slate-500 mt-0.5">L 流动性 / G 增长 / I 通胀 / P 压力（trend_20d 加权，归因口径）</p>
+          </div>
+          <span id="lgip-dominant" class="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded border">--</span>
+        </div>
+        <div class="relative h-52 w-full flex-1">
+          <canvas id="lgipChart"></canvas>
+        </div>
+        <div class="mt-2 pt-2 border-t border-slate-100 text-[11px] text-slate-500">
+          归因口径：lgip_role = attribution_only，不直接生成 M 状态
+        </div>
+      </div>
+
+      <!-- 图 2：S 五维评分雷达 -->
+      <div class="bg-white border border-slate-200 rounded-lg p-4 flex flex-col">
+        <div class="flex items-start justify-between gap-2 mb-3">
+          <div>
+            <h3 class="text-sm font-bold text-slate-900">S 五维评分</h3>
+            <p class="text-[11px] text-slate-500 mt-0.5">trend .30 / leverage .25 / heat .20 / deleverage .15 / volatility .10</p>
+          </div>
+          <span id="s-phase" class="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded border">--</span>
+        </div>
+        <div class="relative h-52 w-full flex-1">
+          <canvas id="sRadarChart"></canvas>
+        </div>
+        <div class="mt-2 pt-2 border-t border-slate-100 text-[11px] text-slate-500">
+          weighted_sum = Σ(weight × score)；S0 需候选分输入，本面板不产出 S0
+        </div>
+      </div>
+
+      <!-- 图 3：7×7 决策矩阵热力 -->
+      <div class="bg-white border border-slate-200 rounded-lg p-4 flex flex-col">
+        <div class="flex items-start justify-between gap-2 mb-3">
+          <div>
+            <h3 class="text-sm font-bold text-slate-900">7×7 M×S 决策矩阵</h3>
+            <p class="text-[11px] text-slate-500 mt-0.5">单元格 = T/R；颜色 = 风险档位</p>
+          </div>
+        </div>
+        <div class="flex-1 overflow-auto">
+          <table id="matrix-grid" class="w-full text-[10px] tabular-nums border-collapse"></table>
+        </div>
+        <div class="mt-2 pt-2 border-t border-slate-100 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500">
+          <span><i class="inline-block w-2.5 h-2.5 rounded-sm bg-slate-200 align-middle"></i> R0</span>
+          <span><i class="inline-block w-2.5 h-2.5 rounded-sm bg-amber-200 align-middle"></i> R1</span>
+          <span><i class="inline-block w-2.5 h-2.5 rounded-sm bg-blue-300 align-middle"></i> R2</span>
+          <span><i class="inline-block w-2.5 h-2.5 rounded-sm bg-emerald-300 align-middle"></i> R3</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 模块 3：指标面板 ===================== -->
+    <section class="space-y-3">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+          <span class="w-1 h-4 bg-blue-900 rounded-full"></span>
+          核心指标监控面板（输入或拖动滑块实时联动）
+        </h2>
+        <div class="flex items-center gap-3 text-[11px] text-slate-500">
+          <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>顺向</span>
+          <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-slate-300"></span>中性</span>
+          <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500"></span>逆向/压力</span>
+        </div>
+      </div>
+
+      <!-- 宏观组 -->
+      <div>
+        <div class="text-xs font-bold text-slate-700 mb-2">宏观叙事输入 · LGIP trend_20d 标准化趋势（-1 ~ +1）</div>
+        <div id="macro-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+      </div>
+
+      <!-- 市场组 -->
+      <div>
+        <div class="text-xs font-bold text-slate-700 mb-2">市场状态五维评分 · score（-1 ~ +1，正值=多头/过热方向）</div>
+        <div id="s-dim-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+      </div>
+    </section>
+
+    <!-- ===================== 模块 4：Checklist ===================== -->
+    <section class="bg-white border border-slate-200 rounded-lg p-4">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3 pb-2.5 border-b border-slate-100">
+        <div>
+          <h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+            <span class="w-1 h-4 bg-blue-900 rounded-full"></span>
+            复盘 Checklist（自动判定项高亮 + 人工勾选项）
+          </h2>
+          <p class="text-[11px] text-slate-500 mt-0.5">左侧监控“宏观失效与生存模式”，右侧监控“状态转移与熔断确认”</p>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <span id="checklist-risk-count" class="px-2.5 py-1 rounded bg-red-50 text-red-700 border border-red-200 font-semibold tabular-nums">风险触发: 0</span>
+          <span id="checklist-reset-count" class="px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold tabular-nums">确认项: 0/4</span>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="border border-red-200/80 bg-red-50/20 rounded-lg p-3.5">
+          <div class="flex items-center justify-between mb-2.5">
+            <h3 class="text-xs font-bold text-red-800 uppercase tracking-wide flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-red-600"></span>
+              风险与失效确认项
+            </h3>
+            <span class="text-[11px] text-red-600/80 font-medium">满足越多，防御优先级越高</span>
+          </div>
+          <div id="checklist-risk" class="space-y-2"></div>
+        </div>
+        <div class="border border-emerald-200/80 bg-emerald-50/20 rounded-lg p-3.5">
+          <div class="flex items-center justify-between mb-2.5">
+            <h3 class="text-xs font-bold text-emerald-800 uppercase tracking-wide flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-emerald-600"></span>
+              状态转移与熔断确认项
+            </h3>
+            <span class="text-[11px] text-emerald-700/80 font-medium">满足越多，状态切换证据越充分</span>
+          </div>
+          <div id="checklist-reset" class="space-y-2"></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="max-w-[1440px] mx-auto px-4 sm:px-6 py-4 text-center text-[11px] text-slate-400">
+    Macro×Signals（MxS）监控仪表盘 · ms_brain 框架逻辑推演与复盘参考 · Kelly 参数 UNCALIBRATED，不构成投资建议
+  </footer>
+
+  <script>
+    // ==========================================================================
+    // SSOT 数据（来源 knowledge/framework/config/*.yaml，2026-11 检出）
+    // ==========================================================================
+
+    // 1. M1–M7 宏观叙事（narratives.yaml）
+    const M_STATES = {
+      M1: { name: '流动牛市', name_en: 'Liquidity Bull', bias: 1, template: 'T1', threshold: 60,
+            essence: '宽松驱动', driver: 'Central Bank Liquidity + Weak Dollar',
+            invalidation: 'DXY 急升 + Real Yield 上行 + ETF flow 转负',
+            confirmation: 'Funding > 0, Basis 升水, ETF inflow > 0' },
+      M2: { name: '再通复苏', name_en: 'Reflation', bias: 1, template: 'T1', threshold: 55,
+            essence: '真实增长改善且通胀约束不绑定', driver: '实际增长改善与融资秩序证据',
+            invalidation: 'BE trend 转负 + 黄金回落 + SPX 破位',
+            confirmation: 'BE trend > 0, Gold trend > 0, BTC correlation ↑' },
+      M3: { name: '软着繁荣', name_en: 'Goldilocks', bias: 1, template: 'T1', threshold: 65,
+            essence: '软着繁荣', driver: 'Strong Growth + Low Volatility',
+            invalidation: 'VIX 急升 + SPX 破位 + 信用利差走阔',
+            confirmation: 'VIX < 20, SPX trend > 0, Funding > 0' },
+      M4: { name: '鹰派通胀', name_en: 'Hawkish Inflation', bias: -1, template: 'T7', threshold: 60,
+            essence: '鹰派通胀', driver: 'Fed Tightening + Sticky Inflation',
+            invalidation: 'Fed 转鸽 + 通胀回落 + DXY 走弱',
+            confirmation: 'Real yield > 0, DXY trend > 0, Funding < 0' },
+      M5: { name: '衰退降息', name_en: 'Recession', bias: -1, template: 'T7', threshold: 70,
+            essence: '衰退降息', driver: 'Growth Collapse + Deflation',
+            invalidation: 'SPX 企稳 + 通胀回升 + 降息预期落空',
+            confirmation: 'SPX < -0.5%, BE < 0, Yield curve 陡峭化' },
+      M6: { name: '信用去杠', name_en: 'Deleveraging', bias: -1, template: 'T7', threshold: 80,
+            essence: '信用去杠', driver: 'Liquidity Crisis + Dollar Spike',
+            invalidation: '央行紧急干预 + 流动性恢复 + SPX 止跌',
+            confirmation: 'DXY > +1%/日, SPX < -3%/日, Funding 极端负',
+            survival: true },
+      M7: { name: '滞胀冲击', name_en: 'Stagflation', bias: -1, template: 'T7', threshold: 50,
+            essence: '真实增长受损且通胀约束绑定', driver: '增长与通胀约束证据',
+            invalidation: '供给恢复 + 通胀回落 + 避险情绪消退',
+            confirmation: 'Gold > +1%, BE > 5bp, SPX < 0' }
+    };
+
+    // 2. S0–S7 市场状态（regimes.yaml）
+    const S_STATES = {
+      S0: { name: '未分类', direction: 'unknown', risk_tier: 'R0', max_leverage: 0, position_cap: 0,
+            warnings: ['系统无法判断当前状态', '等待信号明确后再行动'] },
+      S1: { name: '多头趋势', direction: 'long', risk_tier: 'R2', max_leverage: 5, position_cap: 0.35, warnings: [] },
+      S2: { name: '挤空尾声', direction: 'long_exhausted', risk_tier: 'R1', max_leverage: 3, position_cap: 0.15,
+            warnings: ['严禁追高', '优先减仓'] },
+      S3: { name: '空头趋势', direction: 'short', risk_tier: 'R2', max_leverage: 5, position_cap: 0.35, warnings: [] },
+      S4: { name: '踩踏尾声', direction: 'short_exhausted', risk_tier: 'R1', max_leverage: 2, position_cap: 0.10,
+            warnings: ['严禁追空', '流动性极差'] },
+      S5: { name: '箱体震荡', direction: 'neutral', risk_tier: 'R2', max_leverage: 5, position_cap: 0.25,
+            warnings: [], strategy: 'grid_mean_reversion' },
+      S6: { name: '低波横盘', direction: 'wait', risk_tier: 'R1', max_leverage: 1, position_cap: 0.05,
+            warnings: [], action: '观望为主，允许埋伏' },
+      S7: { name: '压缩蓄势', direction: 'breakout_pending', risk_tier: 'R1', max_leverage: 5, position_cap: 0.20,
+            warnings: [], strategy: 'breakout_follow' }
+    };
+    const S_ORDER = ['S0','S1','S2','S3','S4','S5','S6','S7'];
+
+    // 3. LGIP 四因子（narratives.yaml，trend_20d 加权归因）
+    const LGIP = {
+      L: { name: '流动性因子', components: [
+        { key: 'real_yield', weight: -0.45 }, { key: 'dxy', weight: -0.35 }, { key: 'spx', weight: 0.20 } ] },
+      G: { name: '增长因子', components: [
+        { key: 'spx', weight: 0.45 }, { key: 'real_yield', weight: 0.25 }, { key: 'gold', weight: -0.20 }, { key: 'copper', weight: 0.10 } ] },
+      I: { name: '通胀因子', components: [
+        { key: 'breakeven', weight: 0.60 }, { key: 'gold', weight: 0.10 }, { key: 'oil', weight: 0.15 }, { key: 'real_yield', weight: -0.15 } ] },
+      P: { name: '压力因子', components: [
+        { key: 'dxy', weight: 0.34 }, { key: 'hy_oas', weight: 0.25 }, { key: 'spx', weight: -0.26 }, { key: 'breakeven', weight: -0.15 } ] }
+    };
+
+    // 4. 7×7 决策矩阵（ms_matrix_core.yaml）：[模板, 风险档位]，列序 S0..S7
+    const DECISION_MATRIX = {
+      M1: ['T7/R0','T1/R2','T2/R1','T1/R2','T4/R1','T5/R1','T7/R0','T6/R1'],
+      M2: ['T7/R0','T1/R3','T2/R1','T7/R0','T4/R1','T5/R1','T7/R0','T6/R1'],
+      M3: ['T7/R0','T1/R3','T2/R1','T7/R0','T4/R1','T5/R1','T7/R0','T6/R1'],
+      M4: ['T7/R0','T1/R1','T2/R0','T1/R2','T4/R0','T5/R1','T7/R0','T6/R1'],
+      M5: ['T7/R0','T7/R1','T2/R0','T1/R3','T4/R0','T5/R1','T7/R0','T6/R1'],
+      M6: ['T7/R0','T7/R0','T7/R0','T7/R0','T7/R0','T7/R0','T7/R0','T7/R0'],
+      M7: ['T7/R0','T1/R2','T2/R1','T7/R0','T4/R1','T5/R1','T7/R0','T6/R1']
+    };
+
+    // 5. 风险档位（risk.yaml）
+    const RISK_TIERS = {
+      R0: { name: '禁止交易', position_cap_pct: 0.0, leverage_cap: 0, kelly_fraction: 0 },
+      R1: { name: '极低风险', position_cap_pct: 0.15, leverage_cap: 2, kelly_fraction: 0.25 },
+      R2: { name: '标准风险', position_cap_pct: 0.35, leverage_cap: 5, kelly_fraction: 0.50 },
+      R3: { name: '进攻风险', position_cap_pct: 0.50, leverage_cap: 5, kelly_fraction: 0.75 }
+    };
+    const R_ORDER = ['R0','R1','R2','R3'];
+
+    // 6. 策略模板（strategy_templates.yaml）
+    const TEMPLATES = {
+      T1: { name: '顺势跟随', style: 'TREND' }, T2: { name: '减速止盈', style: 'SCALING_OUT' },
+      T3: { name: '反转博弈', style: 'REVERSAL' }, T4: { name: '去杠杆反弹', style: 'BOUNCE' },
+      T5: { name: '震荡套利', style: 'RANGE' }, T6: { name: '强趋势加速', style: 'MOMENTUM' },
+      T7: { name: '防御/仅平仓', style: 'DEFENSIVE' }
+    };
+
+    // 7. 49 格单元参数（matrix_cells.yaml，UNCALIBRATED）
+    const MATRIX_CELLS = {"M1_S1":{"direction":"long","max_leverage":5.0,"position_cap":0.2,"stop_loss":0.02,"rr_ratio":3.0,"kelly":0.25,"notes":"黄金组合"},"M1_S2":{"direction":"long","max_leverage":2,"position_cap":0.1,"stop_loss":0.03,"rr_ratio":2.0,"kelly":0.15,"notes":"减仓信号"},"M1_S3":{"direction":"neutral","max_leverage":1.0,"position_cap":0.05,"stop_loss":0.015,"rr_ratio":2.0,"kelly":0.1,"notes":"观望"},"M1_S4":{"direction":"long","max_leverage":2.0,"position_cap":0.08,"stop_loss":0.025,"rr_ratio":3.0,"kelly":0.15,"notes":"抄底窗口"},"M1_S5":{"direction":"long","max_leverage":2,"position_cap":0.12,"stop_loss":0.015,"rr_ratio":2.0,"kelly":0.2,"notes":"区间操作"},"M1_S6":{"direction":"neutral","max_leverage":0,"position_cap":0,"stop_loss":null,"rr_ratio":null,"kelly":0.0,"notes":"仅平仓"},"M1_S7":{"direction":"long","max_leverage":2,"position_cap":0.15,"stop_loss":0.02,"rr_ratio":4.0,"kelly":0.25,"notes":"突破预备"},"M2_S1":{"direction":"long","max_leverage":4.0,"position_cap":0.18,"stop_loss":0.02,"rr_ratio":2.5,"kelly":0.22,"notes":"顺势加仓"},"M2_S2":{"direction":"long","max_leverage":2.0,"position_cap":0.08,"stop_loss":0.025,"rr_ratio":2.0,"kelly":0.12,"notes":"谨慎减仓"},"M2_S3":{"direction":"neutral","max_leverage":0,"position_cap":0,"stop_loss":null,"rr_ratio":null,"kelly":0.0,"notes":"仅平仓"},"M2_S4":{"direction":"long","max_leverage":2,"position_cap":0.1,"stop_loss":0.02,"rr_ratio":3.0,"kelly":0.18,"notes":"抄底"},"M2_S5":{"direction":"long","max_leverage":2,"position_cap":0.12,"stop_loss":0.015,"rr_ratio":2.0,"kelly":0.18,"notes":"区间多"},"M2_S6":{"direction":"neutral","max_leverage":0,"position_cap":0,"stop_loss":null,"rr_ratio":null,"kelly":0.0,"notes":"仅平仓"},"M2_S7":{"direction":"long","max_leverage":2,"position_cap":0.15,"stop_loss":0.018,"rr_ratio":3.5,"kelly":0.22,"notes":"突破预备"},"M3_S1":{"direction":"long","max_leverage":4.0,"position_cap":0.15,"stop_loss":0.02,"rr_ratio":2.5,"kelly":0.2,"notes":"稳健做多"},"M3_S2":{"direction":"long","max_leverage":2.0,"position_cap":0.08,"stop_loss":0.025,"rr_ratio":2.0,"kelly":0.12,"notes":"减仓"},"M3_S3":{"direction":"neutral","max_leverage":0,"position_cap":0,"stop_loss":null,"rr_ratio":null,"kelly":0.0,"notes":"仅平仓"},"M3_S4":{"direction":"neutral","max_leverage":1.0,"position_cap":0.05,"stop_loss":0.02,"rr_ratio":2.0,"kelly":0.1,"notes":"观望"},"M3_S5":{"direction":"long","max_leverage":2.0,"position_cap":0.1,"stop_loss":0.015,"rr_ratio":2.0,"kelly":0.15,"notes":"区间交易"},"M3_S6":{"direction":"neutral","max_leverage":0,"position_cap":0,"stop_loss":null,"rr_ratio":null,"kelly":0.0,"notes":"仅平仓"},"M3_S7":{"direction":"long","max_leverage":2,"position_cap":0.12,"stop_loss":0.018,"rr_ratio":3.0,"kelly":0.18,"notes":"突破预备"},"M4_S1":{"direction":"long","max_leverage":2.0,"position_cap":0.08,"stop_loss":0.025,"rr_ratio":2.0,"kelly":0.12,"notes":"谨慎做多"},"M4_S2":{"direction":"neutral","max_leverage":0,"position_cap":0,"stop_loss":null,"rr_ratio":null,"kelly":0.0,"notes":"仅平仓"},"M4_S3":{"direction":"short","max_leverage":3.0,"position_cap":0.12,"stop_loss":0.02,"rr_ratio":2.5,"kelly":0.18,"notes":"顺势做空"},"M4_S4":{"direction":"neutral","max_leverage":0,"position_cap":0,"stop_loss":null,"rr_ratio":null,"kelly":0.0,"notes":"仅平仓"},"M4_S5":{"direction":"neutral","max_leverage":1.0,"position_cap":0.05,"stop_loss":0.015,"rr_ratio":1.5,"kelly":0.1,"notes":"观望"},"M4_S6":{"direction":"neutral","max_leverage":0,"position_cap":0,"stop_loss":null,"rr_ratio":null,"kelly":0.0,"notes":"仅平仓"},"M4_S7":{"direction":"short","max_leverage":2.0,"position_cap":0.08,"stop_loss":0.02,"rr_ratio":2.5,"kelly":0.12,"notes":"下破预备"},"M5_S1":{"direction":"long","max_leverage":2,"position_cap":0.12,"stop_loss":0.02,"rr_ratio":2.5,"kelly":0.18,"notes":"降息利多"},"M5_S2":{"direction":"neutral","max_leverage":0,"position_cap":0,"stop_loss":null,"rr_ratio":null,"kelly":0.0,"notes":"仅平仓"},"M5_S3":{"direction":"neutral","max_leverage":1.0,"position_cap":0.03,"stop_loss":0.015,"rr_ratio":2.0,"kelly":0.08,"notes":"观望"},"M5_S4":{"direction":"neutral","max_leverage":0,"position_cap":0,"stop_loss":null,"rr_ratio":null,"kelly":0.0,"notes":"仅平仓"},"M5_S5":{"direction":"long","max_leverage":2.0,"position_cap":0.1,"stop_loss":0.015,"rr_ratio":2.0,"kelly":0.15,"notes":"区间多"},"M5_S6":{"direction":"neutral","max_leverage":0,"position_cap":0,"stop_loss":null,"rr_ratio":null,"kelly":0.0,"notes":"仅平仓"},"M5_S7":{"direction":"long","max_leverage":2,"position_cap":0.12,"stop_loss":0.018,"rr_ratio":3.0,"kelly":0.18,"notes":"突破预备"},"M6_S1":{"direction":"neutral","max_leverage":0,"position_cap":0,"stop_loss":null,"rr_ratio":null,"kelly":0.0,"notes":"禁止交易"},"M6_S2":{"direction":"neutral","max_leverage":0,"position_cap":0,"stop_loss":null,"rr_ratio":null,"kelly":0.0,"notes":"禁止交易"},"M6_S3":{"direction":"neutral","max_leverage":0,"position_cap":0,"stop_loss":null,"rr_ratio":null,"kelly":0.0,"notes":"禁止交易"},"M6_S4":{"direction":"neutral","max_leverage":0,"position_cap":0,"stop_loss":null,"rr_ratio":null,"kelly":0.0,"notes":"禁止交易"},"M6_S5":{"direction":"neutral","max_leverage":0,"position_cap":0,"stop_loss":null,"rr_ratio":null,"kelly":0.0,"notes":"禁止交易"},"M6_S6":{"direction":"neutral","max_leverage":0,"position_cap":0,"stop_loss":null,"rr_ratio":null,"kelly":0.0,"notes":"禁止交易"},"M6_S7":{"direction":"neutral","max_leverage":0,"position_cap":0,"stop_loss":null,"rr_ratio":null,"kelly":0.0,"notes":"禁止交易"},"M7_S1":{"direction":"neutral","max_leverage":1.0,"position_cap":0.05,"stop_loss":0.03,"rr_ratio":2.0,"kelly":0.08,"notes":"极度谨慎"},"M7_S2":{"direction":"short","max_leverage":2.0,"position_cap":0.08,"stop_loss":0.03,"rr_ratio":2.0,"kelly":0.1,"notes":"择机做空"},"M7_S3":{"direction":"neutral","max_leverage":0,"position_cap":0,"stop_loss":null,"rr_ratio":null,"kelly":0.0,"notes":"仅平仓"},"M7_S4":{"direction":"neutral","max_leverage":1.0,"position_cap":0.03,"stop_loss":0.02,"rr_ratio":2.0,"kelly":0.05,"notes":"观望"},"M7_S5":{"direction":"neutral","max_leverage":1.0,"position_cap":0.05,"stop_loss":0.02,"rr_ratio":1.5,"kelly":0.08,"notes":"保守"},"M7_S6":{"direction":"neutral","max_leverage":0,"position_cap":0,"stop_loss":null,"rr_ratio":null,"kelly":0.0,"notes":"仅平仓"},"M7_S7":{"direction":"short","max_leverage":2.0,"position_cap":0.08,"stop_loss":0.02,"rr_ratio":2.5,"kelly":0.12,"notes":"下破预备"}};
+
+    // ==========================================================================
+    // 情景预设（MxS 快照：M 状态 + 置信度 + 宏观趋势 + S 五维评分）
+    // ==========================================================================
+    const SCENARIOS = {
+      bull: {
+        label: 'M1×S1 流动牛市·多头趋势（黄金组合）',
+        m: 'M1', conf: 78, age: 1,
+        s: { trend: 0.9, leverage: 0.6, heat: 0.65, deleverage: -0.1, volatility: 0.4 },
+        macro: { real_yield: -0.6, dxy: -0.5, spx: 0.7, breakeven: 0.2, gold: 0.1, oil: -0.1,
+                 copper: 0.4, hy_oas: -0.3, yield_curve: 0.2, jobless_claims: -0.4, vix: -0.5 }
+      },
+      squeeze: {
+        label: 'M1×S2 挤空尾声（过热减仓）',
+        m: 'M1', conf: 70, age: 2,
+        s: { trend: 0.7, leverage: 0.9, heat: 0.9, deleverage: -0.1, volatility: 0.4 },
+        macro: { real_yield: -0.4, dxy: -0.4, spx: 0.8, breakeven: 0.3, gold: 0.0, oil: 0.1,
+                 copper: 0.3, hy_oas: -0.2, yield_curve: 0.1, jobless_claims: -0.2, vix: 0.3 }
+      },
+      goldilocks: {
+        label: 'M3×S6 软着繁荣·低波横盘',
+        m: 'M3', conf: 70, age: 3,
+        s: { trend: 0.2, leverage: 0.1, heat: 0.1, deleverage: 0.0, volatility: -0.8 },
+        macro: { real_yield: -0.2, dxy: -0.3, spx: 0.6, breakeven: 0.1, gold: 0.2, oil: 0.0,
+                 copper: 0.3, hy_oas: -0.2, yield_curve: 0.1, jobless_claims: -0.2, vix: -0.7 }
+      },
+      hawk: {
+        label: 'M4×S3 鹰派通胀·空头趋势',
+        m: 'M4', conf: 72, age: 2,
+        s: { trend: -0.9, leverage: -0.6, heat: -0.5, deleverage: -0.4, volatility: 0.1 },
+        macro: { real_yield: 0.8, dxy: 0.7, spx: -0.5, breakeven: 0.6, gold: -0.2, oil: 0.4,
+                 copper: -0.3, hy_oas: 0.5, yield_curve: -0.2, jobless_claims: 0.3, vix: 0.4 }
+      },
+      reflation: {
+        label: 'M2×S7 再通复苏·压缩蓄势',
+        m: 'M2', conf: 66, age: 4,
+        s: { trend: 0.3, leverage: 0.3, heat: 0.2, deleverage: -0.1, volatility: -0.7 },
+        macro: { real_yield: 0.1, dxy: -0.2, spx: 0.5, breakeven: 0.7, gold: 0.5, oil: 0.3,
+                 copper: 0.6, hy_oas: -0.1, yield_curve: 0.3, jobless_claims: -0.3, vix: -0.2 }
+      },
+      stagflation: {
+        label: 'M7×S5 滞胀冲击·箱体震荡',
+        m: 'M7', conf: 58, age: 6,
+        s: { trend: -0.2, leverage: 0.0, heat: -0.1, deleverage: -0.1, volatility: 0.6 },
+        macro: { real_yield: 0.5, dxy: 0.2, spx: -0.3, breakeven: 0.8, gold: 0.9, oil: 0.7,
+                 copper: -0.4, hy_oas: 0.4, yield_curve: -0.3, jobless_claims: 0.2, vix: 0.5 }
+      },
+      recession: {
+        label: 'M5×S4 衰退降息·踩踏尾声',
+        m: 'M5', conf: 75, age: 3,
+        s: { trend: -1.0, leverage: -1.0, heat: -0.9, deleverage: 0.9, volatility: 0.6 },
+        macro: { real_yield: -0.5, dxy: 0.4, spx: -0.8, breakeven: -0.6, gold: 0.3, oil: -0.4,
+                 copper: -0.6, hy_oas: 0.6, yield_curve: 0.4, jobless_claims: 0.7, vix: 0.6 }
+      },
+      delever: {
+        label: 'M6×S4 信用去杠·踩踏尾声（生存模式）',
+        m: 'M6', conf: 85, age: 1,
+        s: { trend: -1.0, leverage: -1.0, heat: -0.9, deleverage: 0.9, volatility: 0.7 },
+        macro: { real_yield: 0.9, dxy: 1.0, spx: -1.0, breakeven: -0.3, gold: 0.6, oil: 0.8,
+                 copper: -0.8, hy_oas: 1.0, yield_curve: -0.4, jobless_claims: 0.9, vix: 1.0 }
+      }
+    };
+
+    // ==========================================================================
+    // 指标面板元数据
+    // ==========================================================================
+    const MACRO_GROUPS = [
+      {
+        title: '宏观流动性与增长',
+        subtitle: 'LGIP L/G 主成分',
+        items: [
+          { key: 'real_yield', name: '实际利率 10Y', src: 'FRED:DFII10', unit: 'σ',
+            evalStatus: (v) => v < -0.4 ? 'green' : (v > 0.4 ? 'red' : 'neutral'),
+            thresholdText: '下行利多流动性，上行压制估值' },
+          { key: 'dxy', name: '美元指数 DXY', src: 'Yahoo:DX-Y.NYB', unit: 'σ',
+            evalStatus: (v) => v < -0.3 ? 'green' : (v > 0.5 ? 'red' : 'neutral'),
+            thresholdText: '走弱利多风险资产，急升触发 M6 观察' },
+          { key: 'spx', name: '标普 500', src: 'FRED:SP500', unit: 'σ',
+            evalStatus: (v) => v > 0.4 ? 'green' : (v < -0.6 ? 'red' : 'neutral'),
+            thresholdText: '增长与风险偏好的同步指标' },
+          { key: 'yield_curve', name: '2s10s 利差', src: 'FRED:T10Y2Y', unit: 'σ',
+            evalStatus: (v) => v > 0.2 ? 'green' : (v < -0.4 ? 'amber' : 'neutral'),
+            thresholdText: '倒挂加深 → M5 衰退降息观察' },
+          { key: 'jobless_claims', name: '初请失业金（4周）', src: 'FRED:ICSA', unit: 'σ',
+            evalStatus: (v) => v < -0.2 ? 'green' : (v > 0.4 ? 'red' : 'neutral'),
+            thresholdText: '周频，B-2 口径相对变化' },
+          { key: 'vix', name: 'VIX 恐慌指数', src: 'FRED:VIXCLS', unit: 'σ',
+            evalStatus: (v) => v < -0.3 ? 'green' : (v > 0.6 ? 'red' : 'amber'),
+            thresholdText: '熔断观察：分位 > 85（percentile 口径）' }
+        ]
+      },
+      {
+        title: '宏观通胀与信用压力',
+        subtitle: 'LGIP I/P 主成分',
+        items: [
+          { key: 'breakeven', name: '10Y 盈亏平衡通胀', src: 'FRED:T10YIE', unit: 'σ',
+            evalStatus: (v) => v > 0.4 ? 'red' : (v < -0.3 ? 'green' : 'neutral'),
+            thresholdText: '上行 → 鹰派通胀 / 滞胀风险' },
+          { key: 'gold', name: '黄金', src: 'Yahoo:GC=F（对照）', unit: 'σ',
+            evalStatus: (v) => v > 0.5 ? 'red' : (v < -0.2 ? 'green' : 'neutral'),
+            thresholdText: '避险与滞胀对冲；canonical 未定仅对照' },
+          { key: 'oil', name: 'WTI 原油', src: 'FRED:DCOILWTICO', unit: 'σ',
+            evalStatus: (v) => v > 0.5 ? 'red' : (v < -0.3 ? 'green' : 'neutral'),
+            thresholdText: '成本推动型通胀核心项' },
+          { key: 'copper', name: '铜', src: 'Yahoo:HG=F（对照）', unit: 'σ',
+            evalStatus: (v) => v > 0.3 ? 'green' : (v < -0.4 ? 'red' : 'neutral'),
+            thresholdText: '工业活动领先指标；仅对照' },
+          { key: 'hy_oas', name: '高收益债利差 OAS', src: 'FRED:BAMLH0A0HYM2', unit: 'σ',
+            evalStatus: (v) => v > 0.4 ? 'red' : (v < -0.3 ? 'green' : 'neutral'),
+            thresholdText: '信用压力黄金指标；走阔 → P 因子抬升' }
+        ]
+      }
+    ];
+
+    const S_DIM_ITEMS = [
+      { key: 'trend', name: '趋势强度', weight: 0.30, desc: '(EMA20 − EMA100) / ATR',
+        evalStatus: (v) => v > 0.5 ? 'green' : (v < -0.5 ? 'red' : 'neutral'),
+        thresholdText: '绝对值主导 weighted_sum 方向' },
+      { key: 'leverage', name: '杠杆热度', weight: 0.25, desc: 'OI 变化 + Funding z-score',
+        evalStatus: (v) => v > 0.6 ? 'amber' : (v < -0.5 ? 'red' : 'neutral'),
+        thresholdText: '过热 → S2；S7 需 leverage > 0.2' },
+      { key: 'heat', name: '市场热度', weight: 0.20, desc: '成交量 z + 爆仓比',
+        evalStatus: (v) => v > 0.7 ? 'red' : (v < -0.5 ? 'red' : 'neutral'),
+        thresholdText: 'ws>0.5 且 heat>0.7 → S2 挤空尾声' },
+      { key: 'deleverage', name: '去杠杆压力', weight: 0.15, desc: '|OI 1h 骤降|（< -5%）',
+        evalStatus: (v) => v > 0.6 ? 'red' : 'neutral',
+        thresholdText: 'ws<-0.5 且 deleverage>0.6 → S4 踩踏尾声' },
+      { key: 'volatility', name: '波动率水平', weight: 0.10, desc: 'ATR14 分位（20d）',
+        evalStatus: (v) => v < -0.5 ? 'green' : (v > 0.5 ? 'red' : 'neutral'),
+        thresholdText: 'vol<0.3 → S6/S7 分支判定' }
+    ];
+
+    const FMETA = { L: '流动性', G: '增长', I: '通胀', P: '压力' };
+
+    // ==========================================================================
+    // 状态与渲染
+    // ==========================================================================
+    const state = {
+      m: 'M1', conf: 78, age: 1,
+      s: { trend: 0.9, leverage: 0.6, heat: 0.65, deleverage: -0.1, volatility: 0.4 },
+      macro: {}
+    };
+    SCENARIOS.bull && Object.assign(state.macro, SCENARIOS.bull.macro);
+    for (const k of Object.keys(SCENARIOS.bull.macro)) if (!(k in state.macro)) state.macro[k] = 0;
+
+    // S 分类（regimes.yaml evaluation.rules，顺序即优先级；S0 需候选分，不产出）
+    function classifyS(v) {
+      const ws = 0.30*v.trend + 0.25*v.leverage + 0.20*v.heat + 0.15*v.deleverage + 0.10*v.volatility;
+      let s;
+      if (ws > 0.5 && v.heat > 0.7) s = 'S2';
+      else if (ws > 0.5) s = 'S1';
+      else if (ws < -0.5 && v.deleverage > 0.6) s = 'S4';
+      else if (ws < -0.5) s = 'S3';
+      else if (v.volatility < 0.3 && v.leverage > 0.2) s = 'S7';
+      else if (v.volatility < 0.3 && v.leverage <= 0.2) s = 'S6';
+      else s = 'S5';
+      return { s, ws };
+    }
+
+    function computeLgip(macro) {
+      const out = {};
+      for (const f of Object.keys(LGIP)) {
+        out[f] = LGIP[f].components.reduce((acc, c) => acc + c.weight * (macro[c.key] || 0), 0);
+      }
+      return out;
+    }
+
+    function fmt(v, d = 2) { return (v >= 0 ? '+' : '') + v.toFixed(d); }
+    function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+
+    // 决策与门控
+    function decide() {
+      const { s: sKey, ws } = classifyS(state.s);
+      const cellRaw = DECISION_MATRIX[state.m][S_ORDER.indexOf(sKey)];
+      const [tpl, riskRaw] = cellRaw.split('/');
+
+      // M 置信度：stale 衰减 → 冲突惩罚 → 门控 → 特殊规则
+      let conf = state.conf / 100;
+      const stale = state.age >= 5;
+      if (stale) conf *= 0.7;
+      const mBias = M_STATES[state.m].bias;
+      const sBias = ({ S0:0,S1:1,S2:1,S3:-1,S4:1,S5:0,S6:0,S7:0 })[sKey];
+      const conflict = mBias * sBias < 0;
+      if (conflict) conf = Math.max(0, conf - 0.25);
+
+      let risk = riskRaw;
+      if (conf < 0.35) risk = 'R0';
+      else if (conf < 0.50 && R_ORDER.indexOf(risk) > R_ORDER.indexOf('R1')) risk = 'R1';
+      if (state.m === 'M6') risk = 'R0';
+      if (state.m === 'M4' && sKey === 'S1' && R_ORDER.indexOf(risk) > R_ORDER.indexOf('R1')) risk = 'R1';
+
+      const tier = RISK_TIERS[risk];
+      const cellKey = `${state.m}_${sKey}`;
+      const cell = MATRIX_CELLS[cellKey] || null;
+      const effLeverage = cell ? Math.min(cell.max_leverage ?? 0, tier.leverage_cap, 5) : 0;
+      const effCap = cell ? Math.min(cell.position_cap ?? 0, tier.position_cap_pct) : 0;
+
+      return { sKey, ws, cellRaw, tpl, riskRaw, risk, conf: Math.max(0, conf), stale, conflict, mBias, sBias, cell, cellKey, tier, effLeverage, effCap };
+    }
+
+    // ---------- DOM 构建 ----------
+    function buildPanels() {
+      // M 下拉
+      const sel = document.getElementById('m-select');
+      sel.innerHTML = Object.keys(M_STATES).map(k =>
+        `<option value="${k}">${k} ${M_STATES[k].name}（${M_STATES[k].name_en}）</option>`).join('');
+      sel.value = state.m;
+      sel.addEventListener('change', () => { state.m = sel.value; render(); });
+
+      // 情景按钮
+      const wrap = document.getElementById('scenario-buttons');
+      for (const [key, sc] of Object.entries(SCENARIOS)) {
+        const b = document.createElement('button');
+        b.className = 'scenario-btn px-3 py-1.5 rounded-md text-xs font-medium border transition-colors';
+        b.textContent = sc.label;
+        b.dataset.scenario = key;
+        b.addEventListener('click', () => applyScenario(key));
+        wrap.appendChild(b);
+      }
+      document.getElementById('btn-reset').addEventListener('click', () => applyScenario('bull'));
+
+      // 通用指标卡渲染器
+      function metricCard(item, group) {
+        const div = document.createElement('div');
+        div.className = 'bg-white border border-slate-200 rounded-lg p-3.5';
+        div.innerHTML = `
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <div class="text-xs font-bold text-slate-900">${item.name}</div>
+              <div class="text-[10px] text-slate-400 mt-0.5">${item.src}</div>
+            </div>
+            <span class="status-dot shrink-0 mt-1 w-2.5 h-2.5 rounded-full bg-slate-300" title=""></span>
+          </div>
+          <div class="text-[10px] text-slate-500 mt-1 leading-snug">${item.desc || item.thresholdText}</div>
+          <div class="mt-2 flex items-center gap-2">
+            <input type="number" step="0.05" min="-1" max="1" class="metric-num w-16 text-xs font-bold tabular-nums text-center border border-slate-300 rounded px-1 py-1 bg-white" />
+            <input type="range" min="-1" max="1" step="0.05" class="inst-slider metric-slider flex-1" />
+            <span class="metric-unit text-[10px] text-slate-400 w-6 text-right">${item.unit || ''}</span>
+          </div>
+          <div class="mt-1.5 text-[10px] text-slate-400 leading-snug">${item.thresholdText}</div>`;
+        const num = div.querySelector('.metric-num');
+        const slider = div.querySelector('.metric-slider');
+        num.addEventListener('input', () => {
+          let v = parseFloat(num.value); if (isNaN(v)) v = 0;
+          v = clamp(v, -1, 1); num.value = v.toFixed(2);
+          slider.value = v; group[item.key] = v; render();
+        });
+        slider.addEventListener('input', () => {
+          const v = parseFloat(slider.value);
+          num.value = v.toFixed(2); group[item.key] = v; render();
+        });
+        div._item = item; div._group = group;
+        return div;
+      }
+
+      const macroGrid = document.getElementById('macro-grid');
+      const sGrid = document.getElementById('s-dim-grid');
+      for (const g of MACRO_GROUPS) {
+        const items = g.items.map(it => metricCard(it, state.macro));
+        macroGrid.append(...items);
+      }
+      for (const it of S_DIM_ITEMS) sGrid.append(metricCard(it, state.s));
+
+      // checklist 容器
+      buildChecklist();
+    }
+
+    function buildChecklist() {
+      const riskBox = document.getElementById('checklist-risk');
+      const resetBox = document.getElementById('checklist-reset');
+      riskBox.innerHTML = `
+        <label class="check-item flex items-start gap-2.5 p-2.5 rounded border border-slate-200 bg-white" data-auto="m6">
+          <input type="checkbox" class="mt-0.5 accent-red-600" /><span class="text-xs text-slate-700">M6 信用去杠生效 → <b>全行 R0</b>，任何 S 状态禁止开新仓</span>
+          <span class="auto-badge ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded"></span>
+        </label>
+        <label class="check-item flex items-start gap-2.5 p-2.5 rounded border border-slate-200 bg-white" data-auto="conflict">
+          <input type="checkbox" class="mt-0.5 accent-red-600" /><span class="text-xs text-slate-700">M×S 方向冲突 → 置信度 -0.25、杠杆 -50%</span>
+          <span class="auto-badge ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded"></span>
+        </label>
+        <label class="check-item flex items-start gap-2.5 p-2.5 rounded border border-slate-200 bg-white" data-auto="gate">
+          <input type="checkbox" class="mt-0.5 accent-red-600" /><span class="text-xs text-slate-700">M 置信度 &lt; 50%（或过期 ≥5 天）→ R 档位降级</span>
+          <span class="auto-badge ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded"></span>
+        </label>
+        <label class="check-item flex items-start gap-2.5 p-2.5 rounded border border-slate-200 bg-white" data-auto="swarn">
+          <input type="checkbox" class="mt-0.5 accent-red-600" /><span class="text-xs text-slate-700">当前 S 状态硬性警告（S2 严禁追高 / S4 严禁追空 / S0 禁止开仓）</span>
+          <span class="auto-badge ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded"></span>
+        </label>`;
+      resetBox.innerHTML = `
+        <label class="check-item flex items-start gap-2.5 p-2.5 rounded border border-slate-200 bg-white">
+          <input type="checkbox" class="mt-0.5 accent-emerald-600" /><span class="text-xs text-slate-700">熔断条件自查：VIX 分位 &gt;85 / 爆仓 &gt;4× / 点差 &gt;0.3% / 基差偏离 &gt;1.5%</span>
+        </label>
+        <label class="check-item flex items-start gap-2.5 p-2.5 rounded border border-slate-200 bg-white" data-auto="minvalid">
+          <input type="checkbox" class="mt-0.5 accent-emerald-600" /><span class="text-xs text-slate-700">当前 M 失效条件未出现：<span class="text-slate-500" id="minvalid-text"></span></span>
+          <span class="auto-badge ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded"></span>
+        </label>
+        <label class="check-item flex items-start gap-2.5 p-2.5 rounded border border-slate-200 bg-white">
+          <input type="checkbox" class="mt-0.5 accent-emerald-600" /><span class="text-xs text-slate-700">目标 S 状态 confirm_bars 确认完成（常规 3 根 / 紧急 1 根）</span>
+        </label>
+        <label class="check-item flex items-start gap-2.5 p-2.5 rounded border border-slate-200 bg-white">
+          <input type="checkbox" class="mt-0.5 accent-emerald-600" /><span class="text-xs text-slate-700">生命周期阶段核对：late 阶段禁止加仓、止损收紧 20%</span>
+        </label>`;
+    }
+
+    // ---------- 场景应用 ----------
+    function applyScenario(key) {
+      const sc = SCENARIOS[key];
+      state.m = sc.m; state.conf = sc.conf; state.age = sc.age;
+      Object.assign(state.s, sc.s);
+      for (const k of Object.keys(state.macro)) state.macro[k] = sc.macro[k] ?? 0;
+      document.getElementById('m-select').value = state.m;
+      document.getElementById('m-conf').value = state.conf;
+      document.getElementById('m-age').value = state.age;
+      render();
+      highlightScenario(key);
+    }
+
+    function highlightScenario(key) {
+      document.querySelectorAll('.scenario-btn').forEach(b => {
+        const on = b.dataset.scenario === key;
+        b.className = 'scenario-btn px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ' +
+          (on ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50');
+      });
+    }
+
+    // 为每个 metric 卡片写回 state 的辅助：重建绑定
+    function bindMetricInputs() {
+      const all = [...document.querySelectorAll('#macro-grid > div, #s-dim-grid > div')];
+      all.forEach(card => {
+        const item = card._item, group = card._group;
+        const num = card.querySelector('.metric-num'), slider = card.querySelector('.metric-slider');
+        const setUI = (v) => { num.value = v.toFixed(2); slider.value = v; };
+        card._setUI = setUI;
+      });
+    }
+
+    // ---------- 渲染 ----------
+    const charts = {};
+    function render() {
+      const d = decide();
+      const lgip = computeLgip(state.macro);
+      const m = M_STATES[state.m];
+      const s = S_STATES[d.sKey];
+
+      // ---- 顶部读数 ----
+      document.getElementById('cell-ms').textContent = `${state.m} × ${d.sKey}`;
+      document.getElementById('cell-tr').textContent = `${d.tpl}/${d.risk}`;
+      document.getElementById('conf-bar').style.width = `${clamp(d.conf * 100, 0, 100)}%`;
+      const badge = document.getElementById('regime-badge-box');
+      const tpl = TEMPLATES[d.tpl];
+      document.getElementById('regime-title').textContent =
+        `${tpl.name}（${tpl.style}）· ${d.risk} ${RISK_TIERS[d.risk].name}`;
+      const riskColor = { R0: 'red', R1: 'amber', R2: 'blue', R3: 'emerald' }[d.risk];
+      badge.className = `border rounded-lg px-3.5 py-2 bg-${riskColor}-50 border-${riskColor}-200`;
+      document.getElementById('regime-title').className = `text-sm font-bold text-${riskColor}-800 leading-none`;
+      document.getElementById('regime-dot').className = `w-2 h-2 rounded-full bg-${riskColor}-600`;
+
+      // ---- M 卡 ----
+      document.getElementById('m-name').textContent = `${m.name} · ${m.essence} · ${m.driver}`;
+      document.getElementById('m-bias').textContent = `bias ${m.bias > 0 ? '+' : ''}${m.bias}`;
+      document.getElementById('m-bias').className = `text-[11px] font-semibold px-1.5 py-0.5 rounded ${m.bias > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`;
+      document.getElementById('m-threshold').textContent = m.threshold;
+      const confEl = document.getElementById('m-conf'), ageEl = document.getElementById('m-age');
+      if (document.activeElement !== confEl) confEl.value = state.conf;
+      if (document.activeElement !== ageEl) ageEl.value = state.age;
+
+      // ---- LGIP 卡 ----
+      const lgipEl = document.getElementById('lgip-readout');
+      lgipEl.innerHTML = Object.keys(LGIP).map(f => {
+        const v = lgip[f];
+        const col = v > 0.15 ? 'text-emerald-700' : (v < -0.15 ? 'text-red-700' : 'text-slate-600');
+        return `<div class="flex justify-between"><span class="text-slate-500">${f} ${FMETA[f]}</span><b class="${col}">${fmt(v)}</b></div>`;
+      }).join('');
+      document.getElementById('lgip-note').textContent =
+        `驱动：${m.driver}；归因非资格判定，M 状态由叙事证据确认`;
+
+      // ---- S 卡 ----
+      document.getElementById('s-badge').textContent = `${d.sKey} ${s.name}`;
+      document.getElementById('s-ws').textContent = `ws ${fmt(d.ws)}`;
+      document.getElementById('s-name').textContent =
+        `方向 ${s.direction} · 基准 R${s.risk_tier.slice(1)} · 杠杆≤${s.max_leverage}x · 仓位≤${Math.round(s.position_cap*100)}%` +
+        (s.action ? ` · ${s.action}` : '');
+      const sw = document.getElementById('s-warnings');
+      sw.innerHTML = s.warnings.map(w => `<div class="text-red-700 font-medium">⚠ ${w}</div>`).join('');
+
+      // ---- 矩阵格卡 ----
+      document.getElementById('cell-template').textContent = `${d.tpl} ${tpl.name}`;
+      document.getElementById('cell-risk').textContent = d.risk;
+      document.getElementById('cell-risk-raw').textContent = d.risk !== d.riskRaw ? `(矩阵原值 ${d.riskRaw}，门控后生效)` : '';
+      const cp = document.getElementById('cell-params');
+      if (d.cell) {
+        cp.innerHTML = [
+          ['方向', d.cell.direction], ['杠杆上限', `${d.effLeverage}x`],
+          ['仓位上限', `${Math.round(d.effCap*100)}%`], ['止损', d.cell.stop_loss ?? '—'],
+          ['盈亏比', d.cell.rr_ratio ?? '—'], ['Kelly', d.cell.kelly ?? '—']
+        ].map(([k,v]) => `<div class="flex justify-between"><span class="text-slate-400">${k}</span><b class="text-slate-800">${v}</b></div>`).join('');
+        document.getElementById('cell-notes').textContent = `单元备注：${d.cell.notes}（参数 UNCALIBRATED）`;
+      } else {
+        cp.innerHTML = '<div class="text-slate-400 col-span-2">无单元参数</div>';
+        document.getElementById('cell-notes').textContent = '';
+      }
+
+      // ---- 门控 pills ----
+      const pills = [];
+      if (d.stale) pills.push(['amber', `M 置信度过期 ≥5 天，已 ×0.7`]);
+      if (d.conflict) pills.push(['red', `M×S 方向冲突（M${m.bias>0?'+':'-'} × S${d.sBias>0?'+':d.sBias<0?'-':'0'}）：置信度 -0.25、杠杆 -50%`]);
+      if (d.conf < 0.5) pills.push(['amber', `M 置信度 ${(d.conf*100).toFixed(0)}% < 50% → R 档位降级生效`]);
+      if (d.risk === 'R0' && d.riskRaw !== 'R0') pills.push(['red', `生效 R0：禁止开新仓，仅平仓`]);
+      if (state.m === 'M6') pills.push(['red', 'M6 生存模式：全行 R0']);
+      document.getElementById('gate-pills').innerHTML = pills.map(([c,t]) =>
+        `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-${c}-50 text-${c}-800 border border-${c}-200">${t}</span>`).join('') ||
+        '<span class="text-[11px] text-slate-400">无门控触发</span>';
+
+      // ---- 指标卡状态灯与数值回显 ----
+      document.querySelectorAll('#macro-grid > div, #s-dim-grid > div').forEach(card => {
+        const item = card._item, group = card._group;
+        const v = group[item.key] ?? 0;
+        const dot = card.querySelector('.status-dot');
+        const st = item.evalStatus(v);
+        dot.className = `status-dot shrink-0 mt-1 w-2.5 h-2.5 rounded-full ${st === 'green' ? 'bg-emerald-500' : st === 'amber' ? 'bg-amber-500' : st === 'red' ? 'bg-red-500' : 'bg-slate-300'}`;
+        card.querySelector('.metric-num').value = v.toFixed(2);
+        card.querySelector('.metric-slider').value = v;
+      });
+
+      // ---- 图表 ----
+      renderLgipChart(lgip);
+      renderSRadar(state.s, d.sKey);
+      renderMatrixGrid(state.m, d.sKey);
+
+      // ---- checklist ----
+      renderChecklist(d);
+
+      // ---- M 信息 ----
+      document.getElementById('minvalid-text').textContent = m.invalidation;
+    }
+
+    function renderLgipChart(lgip) {
+      const ctx = document.getElementById('lgipChart').getContext('2d');
+      const labels = ['L 流动性', 'G 增长', 'I 通胀', 'P 压力'];
+      const vals = ['L','G','I','P'].map(k => +lgip[k].toFixed(3));
+      const dom = ['L','G','I','P'].reduce((a,b) => Math.abs(lgip[b]) > Math.abs(lgip[a]) ? b : a);
+      const badge = document.getElementById('lgip-dominant');
+      badge.textContent = `主导因子 ${dom} ${FMETA[dom]} ${fmt(lgip[dom])}`;
+      if (charts.lgip) { charts.lgip.data.datasets[0].data = vals; charts.lgip.update(); return; }
+      charts.lgip = new Chart(ctx, {
+        type: 'bar',
+        data: { labels, datasets: [{ data: vals,
+          backgroundColor: vals.map(v => v >= 0 ? 'rgba(30,58,138,0.75)' : 'rgba(220,38,38,0.7)'),
+          borderRadius: 4 }] },
+        options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: { x: { min: -1, max: 1, ticks: { callback: v => v.toFixed(1) } }, y: { grid: { display: false } } } }
+      });
+    }
+
+    function renderSRadar(v, sKey) {
+      const ctx = document.getElementById('sRadarChart').getContext('2d');
+      const labels = S_DIM_ITEMS.map(i => i.name);
+      const data = S_DIM_ITEMS.map(i => +v[i.key].toFixed(3));
+      const badge = document.getElementById('s-phase');
+      badge.textContent = `${sKey} · ${S_STATES[sKey].name}`;
+      badge.className = `shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded border ${sKey.startsWith('S') && ['S1','S3'].includes(sKey) ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : sKey==='S0' ? 'bg-red-50 text-red-800 border-red-200' : 'bg-slate-50 text-slate-700 border-slate-200'}`;
+      if (charts.sradar) { charts.sradar.data.datasets[0].data = data; charts.sradar.update(); return; }
+      charts.sradar = new Chart(ctx, {
+        type: 'radar',
+        data: { labels, datasets: [
+          { label: '当前评分', data, borderColor: '#1E3A8A', backgroundColor: 'rgba(30,58,138,0.15)', pointBackgroundColor: '#1E3A8A' },
+          { label: '零轴', data: labels.map(() => 0), borderColor: '#CBD5E1', borderDash: [4,4], pointRadius: 0, fill: false }
+        ]},
+        options: { responsive: true, maintainAspectRatio: false,
+          scales: { r: { min: -1, max: 1, ticks: { display: false }, pointLabels: { font: { size: 10 } } } },
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } } }
+      });
+    }
+
+    function renderMatrixGrid(mKey, sKey) {
+      const grid = document.getElementById('matrix-grid');
+      const tierBg = { R0: 'bg-slate-200 text-slate-500', R1: 'bg-amber-100 text-amber-900', R2: 'bg-blue-100 text-blue-900', R3: 'bg-emerald-100 text-emerald-900' };
+      let html = '<thead><tr><th class="p-1 text-left text-slate-400 font-medium"></th>' +
+        S_ORDER.map(s => `<th class="p-1 text-center text-slate-500 font-semibold">${s}</th>`).join('') + '</tr></thead><tbody>';
+      for (const m of Object.keys(M_STATES)) {
+        html += `<tr><th class="p-1 text-left text-slate-600 font-semibold whitespace-nowrap">${m} ${M_STATES[m].name.slice(0,4)}</th>`;
+        for (const s of S_ORDER) {
+          const cell = DECISION_MATRIX[m][S_ORDER.indexOf(s)];
+          const cur = (m === mKey && s === sKey);
+          html += `<td class="mxs-cell p-1 text-center rounded ${tierBg[cell.split('/')[1]]} ${cur ? 'current font-black' : ''}">${cell}</td>`;
+        }
+        html += '</tr>';
+      }
+      grid.innerHTML = html + '</tbody>';
+    }
+
+    function renderChecklist(d) {
+      const setAuto = (key, triggered, label) => {
+        const el = document.querySelector(`[data-auto="${key}"]`);
+        if (!el) return;
+        const badge = el.querySelector('.auto-badge');
+        el.classList.toggle('ring-2', triggered);
+        el.classList.toggle('ring-red-400', triggered);
+        badge.textContent = triggered ? '已触发' : '未触发';
+        badge.className = `auto-badge ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded ${triggered ? 'bg-red-600 text-white' : 'bg-slate-100 text-slate-400'}`;
+        const cb = el.querySelector('input[type=checkbox]');
+        if (triggered && !cb.checked) cb.checked = true;
+      };
+      const setAutoOk = (key, ok, label) => {
+        const el = document.querySelector(`[data-auto="${key}"]`);
+        if (!el) return;
+        const badge = el.querySelector('.auto-badge');
+        el.classList.toggle('ring-2', ok);
+        el.classList.toggle('ring-emerald-400', ok);
+        badge.textContent = ok ? '满足' : '待确认';
+        badge.className = `auto-badge ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded ${ok ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-400'}`;
+      };
+      setAuto('m6', state.m === 'M6');
+      setAuto('conflict', d.conflict);
+      setAuto('gate', d.conf < 0.5 || d.stale);
+      setAuto('swarn', ['S2','S4','S0'].includes(d.sKey));
+      setAutoOk('minvalid', true); // 人工确认项，默认显示当前 M 失效条件文本
+
+      const riskN = document.querySelectorAll('#checklist-risk [data-auto]').length;
+      const trigN = ['m6','conflict','gate','swarn'].filter(k => {
+        const el = document.querySelector(`[data-auto="${k}"]`);
+        return el && el.querySelector('.auto-badge').textContent === '已触发';
+      }).length;
+      document.getElementById('checklist-risk-count').textContent = `风险触发: ${trigN}`;
+      const okN = document.querySelector('#checklist-reset [data-auto="minvalid"] .auto-badge').textContent === '满足' ? 1 : 0;
+      const manualN = document.querySelectorAll('#checklist-reset input[type=checkbox]:checked').length;
+      document.getElementById('checklist-reset-count').textContent = `确认项: ${manualN}/4`;
+    }
+
+    // ---------- 事件绑定 ----------
+    document.getElementById('m-conf').addEventListener('input', e => { state.conf = clamp(parseFloat(e.target.value)||0, 0, 100); render(); });
+    document.getElementById('m-age').addEventListener('input', e => { state.age = clamp(parseInt(e.target.value)||0, 0, 30); render(); });
+
+    // ---------- 启动 ----------
+    buildPanels();
+    bindMetricInputs();
+    // 同步指标输入回 state 并渲染
+    document.querySelectorAll('#macro-grid > div, #s-dim-grid > div').forEach(card => {
+      const v = (card._group === state.macro ? state.macro : state.s)[card._item.key] ?? 0;
+      card._setUI(v);
+    });
+    applyScenario('bull');
+    highlightScenario('bull');
+  </script>
+</body>
+</html>
